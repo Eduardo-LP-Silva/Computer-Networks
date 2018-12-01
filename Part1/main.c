@@ -10,68 +10,102 @@
 #include <string.h>
 
 #define SERVER_PORT 21
-#define SERVER_HOSTNAME "ftp.fe.up.pt"
-int flag = 1;
+#define SERVER_HOSTNAME "speedtest.tele2.net"
 
 
 void sigalrm_handler(int signal)
 {
-	// printf("Message timed out!\n");
-	flag = 0;
+	printf("Server response timed out!\n");
 }
 
 int setHandler()
 {
 	struct sigaction sigalrm_action;
-
-	sigalrm_action.sa_handler = sigalrm_handler;
+ 	sigalrm_action.sa_handler = sigalrm_handler;
 	sigemptyset(&sigalrm_action.sa_mask);
 	sigalrm_action.sa_flags = 0;
 
-	if (sigaction(SIGALRM, &sigalrm_action, NULL) < 0)
+ 	if (sigaction(SIGALRM, &sigalrm_action, NULL) < 0)
 	{
 		fprintf(stderr,"Unable to install SIGINT handler\n");
 		return 1;
 	}
 
-	return 0;
+ 	return 0;
 }
 
 
-int receiveMessage(int sockfd, char* message)
-{
-	int bytes;
-	char buffer[256];
+int receiveMessage(FILE* fp, char* message)
+{	
+	size_t* bufferSize = malloc(sizeof(size_t));
+	*bufferSize = 1024;
+	int bytes, i, flag = 1;
+	char* buffer = malloc(*bufferSize);
+	char code[4];
 	message[0] = 0;
 	buffer[0] = 0;
 
-	while (flag)
+	for (i = 0; flag; i++)
 	{
 		alarm(1);
+		bytes = getline(&buffer, bufferSize, fp);
+		alarm(0); // Cancel alarm
 
-		bytes = read(sockfd, buffer, 256);
-		if (bytes < 1)
+		if (bytes < 0)
+		{
+			fprintf(stderr, "Error on reading from server!\n");
 			return 1;
+		}
 
 		buffer[bytes] = 0;
 
-		alarm(0); // Cancel alarm
 
-		if (flag)
-			strcat(message, buffer);
+		if (i == 0)
+		{
+			memcpy(code, buffer, 3);
+			code[3] = 0;
+		}
+		else if (memcmp(code, buffer, 3) != 0)
+		{
+			fprintf(stderr, "Error on checking code from server!\n");
+			return 2;
+		}
+
+		if (buffer[3] == ' ')
+			flag = 0;
+
+		strcat(message, buffer);
+
+		// printf("Got response!\n");
 	}
 
-	flag = 1;
 	return 0;
 }
 
-int login(int sockfd, char* username, char* password)
+int sendCommand(int fd, char* command)
 {
-	if (write(sockfd, username, strlen(username)) != strlen(username))
+	int bytes = write(fd, command, strlen(command));
+	printf("Bytes = %i\n", bytes);
+	if (bytes != strlen(command))
+	{
+		fprintf(stderr, "Error seding command!\n");
 		return 1;
+	}
+}
 
-	if (write(sockfd, password, strlen(password)) != strlen(password))
+int login(FILE* fp, char* username, char* password)
+{
+	if (fwrite(username, 1, strlen(username), fp) != strlen(username))
+	{
+		fprintf(stderr, "Error on login!\n");
 		return 1;
+	}
+
+	if (fwrite(password, 1, strlen(password), fp) != strlen(password))
+	{
+		fprintf(stderr, "Error on login!\n");
+		return 1;
+	}
 
 	return 0;
 }
@@ -79,10 +113,11 @@ int login(int sockfd, char* username, char* password)
 int main(int argc, char** argv)
 {
 	
+	setHandler();
 	
 	int	sockfd;
 	struct	sockaddr_in server_addr;
-	char	message[256] = "Mensagem de teste na travessia da pilha TCP/IP\n";  
+	char	message[4096];
 	int	bytes;
 
 	struct hostent * ent = gethostbyname(SERVER_HOSTNAME);
@@ -109,43 +144,32 @@ int main(int argc, char** argv)
 		exit(0);
 	}
 
-	struct sigaction sigalrm_action;
+	FILE* fp = fdopen(sockfd, "rw");
 
-	sigalrm_action.sa_handler = sigalrm_handler;
-	sigemptyset(&sigalrm_action.sa_mask);
-	sigalrm_action.sa_flags = 0;
 
-	if (sigaction(SIGALRM, &sigalrm_action, NULL) < 0)
-	{
-		fprintf(stderr,"Unable to install SIGINT handler\n");
-		return 1;
-	}
-
-		/*send a string to the server*/
-	// bytes = write(sockfd, buf, strlen(buf));
-	// printf("Bytes escritos %d\n", bytes);
-
-	receiveMessage(sockfd, message);
+	receiveMessage(fp, message);
 	printf("%s\n", message);
 	
-	char username[] = "anonymous", password[] = "up201604828";
+	char username[] = "user anonymous\n", password[] = "PASS ola\n";
+	sendCommand(sockfd, username);
 	
-	printf("%i\n", write(sockfd, username, strlen(username))); 
-	
-	receiveMessage(sockfd, message);
+	receiveMessage(fp, message);
 	printf("%s\n", message);
 
-	printf("%i\n", write(sockfd, password, strlen(password))); 
+	sendCommand(sockfd, password);
 
-	receiveMessage(sockfd, message);
+	receiveMessage(fp, message);
 	printf("%s\n", message);
 
-	sleep(2);
 
-	receiveMessage(sockfd, message);
+	sendCommand(sockfd, "PASV\n");
+
+	receiveMessage(fp, message);
 	printf("%s\n", message);
 
 	close(sockfd);
+	fclose(fp);
+
 	return 0;
 }
 
