@@ -51,6 +51,7 @@ int receiveMessage(FILE* fp, char* message)
 		bytes = getline(&buffer, bufferSize, fp);
 		alarm(0); // Cancel alarm
 
+
 		if (bytes < 0)
 		{
 			fprintf(stderr, "Error on reading from server!\n");
@@ -59,6 +60,7 @@ int receiveMessage(FILE* fp, char* message)
 
 		buffer[bytes] = 0;
 
+		printf("buffer = %s\n", buffer);
 
 		if (i == 0)
 		{
@@ -82,10 +84,11 @@ int receiveMessage(FILE* fp, char* message)
 	return 0;
 }
 
-int sendCommand(int fd, char* command)
+int sendCommand(FILE* fp, char* command)
 {
-	int bytes = write(fd, command, strlen(command));
-	printf("Bytes = %i\n", bytes);
+	int bytes = fwrite(command, 1, strlen(command), fp);
+	// printf("Bytes = %i\n", bytes);
+	
 	if (bytes != strlen(command))
 	{
 		fprintf(stderr, "Error seding command!\n");
@@ -110,6 +113,126 @@ int login(FILE* fp, char* username, char* password)
 	return 0;
 }
 
+
+
+
+int enterPassiveMode(FILE** fp, char* message)
+{
+	sendCommand(*fp, "PASV\n");
+
+	receiveMessage(*fp, message);
+	printf("%s\n", message);
+	
+	printf("Changing server for passive mode\n");
+
+	// fclose(*fp);
+
+	char IPAddress[16];
+	IPAddress[0] = 0;
+	int i, j = 0, start = -1, IPAddressCounter = 0, port = 0, messageLength = strlen(message);
+
+	for (int i = 0; i < messageLength; ++i)
+	{
+		if (message[i] == '(')
+			start = i+1;
+
+		if (start != -1 && (message[i] == ',' || message[i] == ')'))
+		{
+			if (IPAddressCounter < 4)
+			{
+				int offset = strlen(IPAddress);
+				
+				memcpy(&IPAddress[offset], &message[start], i-start);
+
+				if (IPAddressCounter < 3)
+				{
+					IPAddress[offset + i-start] = '.';
+					IPAddress[offset + i-start + 1] = 0;
+				}
+				else
+					IPAddress[offset + i-start] = 0;
+			}
+			else
+			{
+				char portString[4];
+				memcpy(portString, &message[start], i-start);
+				long int part = strtol(portString, NULL, 10);
+
+				if (IPAddressCounter == 4)
+				{
+					port = 256*part;
+				}
+				else if (IPAddressCounter == 5)
+				{
+					port += part;
+					printf("Got both IPAddress and port\n");
+					break;
+				}
+				else
+				{
+
+				}
+			}
+
+			start = i+1;
+			IPAddressCounter++;
+
+		}
+	}
+
+	printf("IPAddress = %s\n", IPAddress);
+	printf("port = %i\n", port);
+
+	int	sockfd;
+	struct	sockaddr_in server_addr;
+
+	/*server address handling*/
+	bzero((char*)&server_addr,sizeof(server_addr));
+	server_addr.sin_family = AF_INET;
+	server_addr.sin_addr.s_addr = inet_addr(IPAddress);	/*32 bit Internet address network byte ordered*/
+	server_addr.sin_port = htons(port);		/*server TCP port must be network byte ordered */
+	 
+	/*open an TCP socket*/
+	if ((sockfd = socket(AF_INET,SOCK_STREAM,0)) < 0) {
+			perror("socket()");
+			exit(0);
+		}
+	/*connect to the server*/
+		if(connect(sockfd, 
+				  (struct sockaddr *)&server_addr, 
+			sizeof(server_addr)) < 0){
+			perror("connect()");
+		exit(0);
+	}
+
+	*fp = fdopen(sockfd, "r+");
+
+	
+	return 0;
+}
+
+int receiveFile(FILE* fp, char* message, char* serverFilename, char* clientFilename)
+{
+	message[0] = 0;
+
+	strcpy(message, "RETR ");
+
+	strcpy(message, serverFilename);
+	// strcpy(message, " ");
+	// strcpy(message, clientFilename);
+
+	strcpy(message, "\n");
+
+	sendCommand(fp, message);
+
+	// int fd = open()
+
+	receiveMessage(fp, message);
+	printf("%s\n", message);
+
+}
+
+
 int main(int argc, char** argv)
 {
 	
@@ -121,14 +244,14 @@ int main(int argc, char** argv)
 	int	bytes;
 
 	struct hostent * ent = gethostbyname(SERVER_HOSTNAME);
-	char IPAdress[16];
+	char IPAddress[16];
 		
-	inet_ntop(AF_INET, ent->h_addr_list[0], IPAdress, INET_ADDRSTRLEN);
+	inet_ntop(AF_INET, ent->h_addr_list[0], IPAddress, INET_ADDRSTRLEN);
 	
 	/*server address handling*/
 	bzero((char*)&server_addr,sizeof(server_addr));
 	server_addr.sin_family = AF_INET;
-	server_addr.sin_addr.s_addr = inet_addr(IPAdress);	/*32 bit Internet address network byte ordered*/
+	server_addr.sin_addr.s_addr = inet_addr(IPAddress);	/*32 bit Internet address network byte ordered*/
 	server_addr.sin_port = htons(SERVER_PORT);		/*server TCP port must be network byte ordered */
 	 
 	/*open an TCP socket*/
@@ -144,30 +267,29 @@ int main(int argc, char** argv)
 		exit(0);
 	}
 
-	FILE* fp = fdopen(sockfd, "rw");
+	FILE* fp = fdopen(sockfd, "r+");
 
 
 	receiveMessage(fp, message);
 	printf("%s\n", message);
 	
 	char username[] = "user anonymous\n", password[] = "PASS ola\n";
-	sendCommand(sockfd, username);
+	sendCommand(fp, username);
 	
 	receiveMessage(fp, message);
 	printf("%s\n", message);
 
-	sendCommand(sockfd, password);
+	sendCommand(fp, password);
 
 	receiveMessage(fp, message);
 	printf("%s\n", message);
 
+	enterPassiveMode(&fp, message);
 
-	sendCommand(sockfd, "PASV\n");
+	char serverFilename[] = "1KB.zip", clientFilename[] = "1KB.zip";
 
-	receiveMessage(fp, message);
-	printf("%s\n", message);
+	receiveFile(fp, message, serverFilename, clientFilename);
 
-	close(sockfd);
 	fclose(fp);
 
 	return 0;
