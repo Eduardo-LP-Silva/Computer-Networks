@@ -12,7 +12,7 @@
 
 
 #define SERVER_PORT 21
-#define SERVER_HOSTNAME "ftp.dlptest.com"
+#define SERVER_HOSTNAME "speedtest.tele2.net"
 
 
 int closeSockets(FILE** fileArray)
@@ -351,12 +351,12 @@ int main(int argc, char** argv)
 	receiveMessage(fpArray[0], message);
 	printf("%s\n", message);
 	
-	login(fpArray[0], message, "user dlpuser@dlptest.com\n", "pass e73jzTRTNqCN9PYAAjjn\n");
+	login(fpArray[0], message, "user anonymous\n", "pass anonymous\n");
 	// login(fpArray[0], message, "user dlpuser@dlptest.com\n", "pass e73jzTRTNqCN9PYAAjjn\n");
 
 	enterPassiveMode(fpArray, message);
 
-	char serverFilename[] = "README.md", clientFilename[] = "1KB.zip";
+	char serverFilename[] = "1KB.zip", clientFilename[] = "1KB.zip";
 
 	receiveFile(fpArray, message, serverFilename, serverFilename);
 
