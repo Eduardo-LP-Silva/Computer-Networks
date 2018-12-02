@@ -12,7 +12,9 @@
 
 
 #define SERVER_PORT 21
-#define SERVER_HOSTNAME "speedtest.tele2.net"
+
+// #define SERVER_HOSTNAME "speedtest.tele2.net"
+#define SERVER_HOSTNAME "ftp.dlptest.com"
 
 
 int closeSockets(FILE** fileArray)
@@ -137,8 +139,8 @@ int enterPassiveMode(FILE** fpArray, char* message)
 
 	int	sockfd;
 	int k;
-	for (k = 0; k < 5; k++)
-	{
+	// for (k = 0; k < 5; k++)
+	// {
 		struct	sockaddr_in server_addr;
 
 		char IPAddress[16];
@@ -203,6 +205,8 @@ int enterPassiveMode(FILE** fpArray, char* message)
 		printf("IPAddress = %s\n", IPAddress);
 		printf("port = %i\n", port);
 
+		sleep(1);
+
 
 			/*server address handling*/
 		bzero((char*)&server_addr,sizeof(server_addr));
@@ -214,21 +218,62 @@ int enterPassiveMode(FILE** fpArray, char* message)
 		/*open an TCP socket*/
 		if ((sockfd = socket(AF_INET,SOCK_STREAM,0)) < 0) {
 				perror("socket()");
-				continue;
+				return 1;
 			}
 		/*connect to the server*/
 			if(connect(sockfd, 
 					  (struct sockaddr *)&server_addr, 
 				sizeof(server_addr)) < 0){
 				perror("connect()");
-			continue;
+			return 1;
 		}
 
-		break;
-	}
+		// break;
+	// }
 
 	fpArray[1] = fdopen(sockfd, "r+");
 	
+	return 0;
+}
+
+void swap(char* a, char*b)
+{
+	char temp = *a;
+	*a = *b;
+	*b = temp;
+}
+
+void shiftLeft(char* buffer, int size, int position, int shift)
+{
+	int i, j;
+
+	for (j = 0; j < shift; j++)
+	{
+
+		for (i = position-1; i < size; i++)
+		{
+			swap(&buffer[i], &buffer[i+1]);
+		}
+
+		size--;
+		position--;
+	}
+}
+
+int destuff(char* buffer, int* size)
+{
+	int i;
+	for (i = 0; i < *size-1; i++) // Destuffs the data package
+	{
+		if (buffer[i] == '\r' && buffer[i+1] == '\n')
+		{
+			shiftLeft(buffer, *size, i+1, 1);
+			(*size) -= 1;
+
+			// buffer[i] = FLAG;
+		}
+	}
+
 	return 0;
 }
 
@@ -237,12 +282,12 @@ int receiveFile(FILE** fpArray, char* message, char* serverFilename, char* clien
 	// receiveMessage(fpArray[0], message);
 	// printf("%s\n", message);
 
-	message[0] = 0;
+	// message[0] = 0;
 
-	strcat(message, "LIST\n");
+	// strcat(message, "LIST\n");
 
-	sendCommand(fpArray[0], message);
-	receiveMessage(fpArray[0], message);
+	// sendCommand(fpArray[0], message);
+	// receiveMessage(fpArray[0], message);
 
 	// if (memcmp(message, "15", 2) != 0)
 	// {
@@ -250,11 +295,11 @@ int receiveFile(FILE** fpArray, char* message, char* serverFilename, char* clien
 	// 	return 1;
 	// }
 
-	receiveMessage(fpArray[1], message);
-	printf("%s\n", message);
+	// receiveMessage(fpArray[1], message);
+	// printf("%s\n", message);
 
-	receiveMessage(fpArray[0], message);
-	printf("%s\n", message);
+	// receiveMessage(fpArray[0], message);
+	// printf("%s\n", message);
 
 	// if (memcmp(message, "226", 3) != 0)
 	// {
@@ -262,7 +307,7 @@ int receiveFile(FILE** fpArray, char* message, char* serverFilename, char* clien
 	// 	return 1;
 	// }
 	
-	enterPassiveMode(fpArray, message);
+	// enterPassiveMode(fpArray, message);
 
 	message[0] = 0;
 
@@ -289,19 +334,46 @@ int receiveFile(FILE** fpArray, char* message, char* serverFilename, char* clien
 	receiveMessage(fpArray[0], message);
 	printf("%s\n", message);
 
-	int i, bytes = -69, fd = open(clientFilename, O_WRONLY | O_TRUNC | O_CREAT, 0777);
-	char* buffer = malloc(size);
+	size_t bufferSize = 128;
+	int i, sumBytes = 0, bytes = bufferSize, fd = open(clientFilename, O_WRONLY | O_TRUNC | O_CREAT, 0777);
+	char* buffer = malloc(bufferSize);
 
-	bytes = fread(buffer, 1, size, fpArray[1]);
+	int fd2 = fileno(fpArray[1]);
 
-	printf("bytes = %u\n", bytes);
-
-	if (write(fd, buffer, size) != size)
+	for (i = 0; sumBytes < size; i++)
 	{
-		fprintf(stderr, "Error writing to file!\n");
-	}
-	free(buffer);
+		bufferSize = size - sumBytes;
 
+		if (bufferSize > 128)
+			bufferSize = 128;
+
+		bytes = fread(buffer, 1, bufferSize, fpArray[1]);
+		// buffer[bytes-2] = 0;
+
+		// bytes = read(fd2, buffer, bufferSize-2);
+
+		destuff(buffer, &bytes);
+
+		if (bytes < 0)
+		{
+			printf("Error getting file from!\n");
+			return 1;
+		}
+
+		bytes = write(fd, buffer, bytes);
+
+		if (bytes < 0)
+		{
+			printf("Error writing to file!\n");
+			return 1;
+		}
+
+		sumBytes += bytes;
+	}
+
+	printf("Read and wrote %i bytes\n", sumBytes);
+
+	free(buffer);
 	close(fd);
 
 	printf("File transfered sucessfully!\n");
@@ -351,12 +423,12 @@ int main(int argc, char** argv)
 	receiveMessage(fpArray[0], message);
 	printf("%s\n", message);
 	
-	login(fpArray[0], message, "user anonymous\n", "pass anonymous\n");
-	// login(fpArray[0], message, "user dlpuser@dlptest.com\n", "pass e73jzTRTNqCN9PYAAjjn\n");
+	// login(fpArray[0], message, "user anonymous\n", "pass anonymous\n");
+	login(fpArray[0], message, "user dlpuser@dlptest.com\n", "pass e73jzTRTNqCN9PYAAjjn\n");
 
 	enterPassiveMode(fpArray, message);
 
-	char serverFilename[] = "1KB.zip", clientFilename[] = "1KB.zip";
+	char serverFilename[] = "coco.pdf", clientFilename[] = "1KB.zip";
 
 	receiveFile(fpArray, message, serverFilename, serverFilename);
 
