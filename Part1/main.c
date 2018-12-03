@@ -9,7 +9,7 @@
 #include <netdb.h>
 #include <string.h>
 #include <fcntl.h>
-
+#include <sys/time.h>
 
 #define SERVER_PORT 21
 
@@ -139,8 +139,8 @@ int enterPassiveMode(FILE** fpArray, char* message)
 
 	int	sockfd;
 	int k;
-	// for (k = 0; k < 5; k++)
-	// {
+	for (k = 0; k < 10; k++)
+	{
 		struct	sockaddr_in server_addr;
 
 		char IPAddress[16];
@@ -218,18 +218,18 @@ int enterPassiveMode(FILE** fpArray, char* message)
 		/*open an TCP socket*/
 		if ((sockfd = socket(AF_INET,SOCK_STREAM,0)) < 0) {
 				perror("socket()");
-				return 1;
+				continue;
 			}
 		/*connect to the server*/
 			if(connect(sockfd, 
 					  (struct sockaddr *)&server_addr, 
 				sizeof(server_addr)) < 0){
 				perror("connect()");
-			return 1;
+			continue;
 		}
 
-		// break;
-	// }
+		break;
+	}
 
 	fpArray[1] = fdopen(sockfd, "r+");
 	
@@ -276,6 +276,43 @@ int destuff(char* buffer, int* size)
 
 	return 0;
 }
+
+void printPercentage(double percentage)
+{
+	if (percentage >= 0 && percentage <= 1)
+	{
+		printf("<");
+
+		int i, length = 15 /* length of the percentage bar */;
+		for (i = 0; i < length; i++)
+		{
+			if ((double)i/length < percentage)
+				printf("|");
+			else
+				printf(" ");
+		}
+
+		printf(">%.1f%%\n", percentage*100);
+	}
+}
+
+void printTransferRate(double rate)
+{
+	if (rate > 0)
+	{
+		printf("Transfer rate : %.1f KB/s\n", rate/1024);
+	}
+}
+
+
+void clearScreen()
+{
+	printf("\033[2J\033[1;1H");
+	printf("\033[2J\033[1;1H");
+	printf("\033[2J\033[1;1H");
+	printf("\033[2J\033[1;1H");
+}
+
 
 int receiveFile(FILE** fpArray, char* message, char* serverFilename, char* clientFilename)
 {
@@ -334,19 +371,22 @@ int receiveFile(FILE** fpArray, char* message, char* serverFilename, char* clien
 	receiveMessage(fpArray[0], message);
 	printf("%s\n", message);
 
-	size_t bufferSize = 128;
+	size_t bufferSize = 8096;
 	int i, sumBytes = 0, bytes = bufferSize, fd = open(clientFilename, O_WRONLY | O_TRUNC | O_CREAT, 0777);
 	char* buffer = malloc(bufferSize);
 
 	int fd2 = fileno(fpArray[1]);
 
+	struct timeval startTime, finishTime;
+	double sumTime = 0;
+
+	if (gettimeofday(&startTime, NULL) != 0)
+			printf("Error getting time!\n");
+	if (gettimeofday(&finishTime, NULL) != 0)
+			printf("Error getting time!\n");
+
 	for (i = 0; sumBytes < size; i++)
 	{
-		bufferSize = size - sumBytes;
-
-		if (bufferSize > 128)
-			bufferSize = 128;
-
 		bytes = fread(buffer, 1, bufferSize, fpArray[1]);
 		// buffer[bytes-2] = 0;
 
@@ -368,10 +408,27 @@ int receiveFile(FILE** fpArray, char* message, char* serverFilename, char* clien
 			return 1;
 		}
 
+
+		if (gettimeofday(&finishTime, NULL) != 0)
+			printf("Error getting time!\n");
+
+		double deltaTime = (double)(finishTime.tv_sec - startTime.tv_sec) + (double)(finishTime.tv_usec - startTime.tv_usec)/1000/1000; // In seconds 
+		
+		clearScreen();
+
+		printTransferRate(bufferSize / deltaTime);
+
+		printPercentage((double)sumBytes / size);
+
+		if (gettimeofday(&startTime, NULL) != 0)
+			printf("Error getting time!\n");
+
+
 		sumBytes += bytes;
+		sumTime += deltaTime;
 	}
 
-	printf("Read and wrote %i bytes\n", sumBytes);
+	printf("Read and wrote %i bytes with a average speed of %.1f KB/s\n", sumBytes, size/sumTime/1024);
 
 	free(buffer);
 	close(fd);
@@ -428,7 +485,7 @@ int main(int argc, char** argv)
 
 	enterPassiveMode(fpArray, message);
 
-	char serverFilename[] = "coco.pdf", clientFilename[] = "1KB.zip";
+	char serverFilename[] = "lab2.pdf", clientFilename[] = "1KB.zip";
 
 	receiveFile(fpArray, message, serverFilename, serverFilename);
 
