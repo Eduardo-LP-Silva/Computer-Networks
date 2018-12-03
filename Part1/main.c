@@ -16,6 +16,31 @@
 // #define SERVER_HOSTNAME "speedtest.tele2.net"
 #define SERVER_HOSTNAME "ftp.dlptest.com"
 
+#define MAXCONNECTIONS 10
+
+typedef struct
+{
+	char* IPAddress;
+	int port;
+	FILE* fp;
+}
+connection;
+
+
+connection* currentFp = NULL;
+
+
+int getFreeFilePointer(FILE** fpArray)
+{
+	int i;
+	for (i = 0; i < MAXCONNECTIONS; i++)
+	{
+		if (fpArray[i] == NULL)
+			return i;
+	}
+
+	return -1;
+}
 
 int closeSockets(FILE** fileArray)
 {
@@ -33,6 +58,7 @@ int closeSockets(FILE** fileArray)
 void sigalrm_handler(int signal)
 {
 	printf("Server response timed out!\n");
+
 }
 
 int setHandler()
@@ -51,8 +77,51 @@ int setHandler()
  	return 0;
 }
 
+int attemptConnect(connection* conn, char* message)
+{
+	int	sockfd, i, maxAttempts = 3;
+	struct sockaddr_in server_addr;
+	
+	/*server address handling*/
+	bzero((char*)&server_addr,sizeof(server_addr));
+	server_addr.sin_family = AF_INET;
+	server_addr.sin_addr.s_addr = inet_addr(conn->IPAddress);	/*32 bit Internet address network byte ordered*/
+	server_addr.sin_port = htons(conn->port);		/*server TCP port must be network byte ordered */
+	
+	for (i = 0; i < maxAttempts; i++)
+	{
+		sleep(1);
 
-int receiveMessage(FILE* fp, char* message)
+		/*open an TCP socket*/
+		if ((sockfd = socket(AF_INET,SOCK_STREAM,0)) < 0)
+		{
+			// fprintf(stderr, "socket() failed!\n");
+			continue;
+		}
+		/*connect to the server*/
+		if (connect(sockfd, 
+					  (struct sockaddr *)&server_addr, 
+				sizeof(server_addr)) < 0)
+		{
+			// fprintf(stderr, "connect() failed!\n");
+			continue;
+		}
+
+		break;
+	}
+	
+	if (i == maxAttempts)
+	{
+		fprintf(stderr, "Connection timed out!\n");
+		return 1;
+	}
+
+	conn->fp = fdopen(sockfd, "r+");
+
+	return 0;
+}
+
+int receiveMessage(connection* conn, char* message)
 {	
 	size_t* bufferSize = malloc(sizeof(size_t));
 	*bufferSize = 1024;
@@ -65,7 +134,7 @@ int receiveMessage(FILE* fp, char* message)
 	for (i = 0; flag; i++)
 	{
 		alarm(1);
-		bytes = getline(&buffer, bufferSize, fp);
+		bytes = getline(&buffer, bufferSize, conn->fp);
 		alarm(0); // Cancel alarm
 
 
@@ -104,9 +173,9 @@ int receiveMessage(FILE* fp, char* message)
 	return 0;
 }
 
-int sendCommand(FILE* fp, char* command)
+int sendCommand(connection* conn, char* command)
 {
-	int bytes = fwrite(command, 1, strlen(command), fp);
+	int bytes = fwrite(command, 1, strlen(command), conn->fp);
 	// printf("Bytes = %i\n", bytes);
 	
 	if (bytes != strlen(command))
@@ -116,16 +185,16 @@ int sendCommand(FILE* fp, char* command)
 	}
 }
 
-int login(FILE* fp, char* message, char* username, char* password)
+int login(connection* conn, char* message, char* username, char* password)
 {
-	sendCommand(fp, username);
+	sendCommand(conn, username);
 	
-	receiveMessage(fp, message);
+	receiveMessage(conn, message);
 	printf("%s\n", message);
 
-	sendCommand(fp, password);
+	sendCommand(conn, password);
 
-	receiveMessage(fp, message);
+	receiveMessage(conn, message);
 	printf("%s\n", message);
 
 	return 0;
@@ -134,26 +203,23 @@ int login(FILE* fp, char* message, char* username, char* password)
 
 
 
-int enterPassiveMode(FILE** fpArray, char* message)
+int enterPassiveMode(connection** connections, char* message)
 {
-
-	int	sockfd;
-	int k;
+	int	sockfd, i, j, k, start, IPAddressCounter, messageLength;
 	for (k = 0; k < 10; k++)
 	{
-		struct	sockaddr_in server_addr;
+		connections[1]->IPAddress[0] = 0;
+		start = -1;
+		IPAddressCounter = 0;
+		connections[1]->port = 0;
 
-		char IPAddress[16];
-		IPAddress[0] = 0;
-		int i, j = 0, start = -1, IPAddressCounter = 0, port = 0, messageLength = strlen(message);
+		sendCommand(connections[0], "PASV\n");
 
-		sendCommand(fpArray[0], "PASV\n");
+		receiveMessage(connections[0], message);
+		messageLength = strlen(message);
 
-		receiveMessage(fpArray[0], message);
-		
 		printf("Changing server for passive mode\n");
 
-		j = 0, start = -1, IPAddressCounter = 0, port = 0, messageLength = strlen(message);
 		for (i = 0; i < messageLength; ++i)
 		{
 			if (message[i] == '(')
@@ -163,17 +229,17 @@ int enterPassiveMode(FILE** fpArray, char* message)
 			{
 				if (IPAddressCounter < 4)
 				{
-					int offset = strlen(IPAddress);
+					int offset = strlen(connections[1]->IPAddress);
 					
-					memcpy(&IPAddress[offset], &message[start], i-start);
+					memcpy(&connections[1]->IPAddress[offset], &message[start], i-start);
 
 					if (IPAddressCounter < 3)
 					{
-						IPAddress[offset + i-start] = '.';
-						IPAddress[offset + i-start + 1] = 0;
+						connections[1]->IPAddress[offset + i-start] = '.';
+						connections[1]->IPAddress[offset + i-start + 1] = 0;
 					}
 					else
-						IPAddress[offset + i-start] = 0;
+						connections[1]->IPAddress[offset + i-start] = 0;
 				}
 				else
 				{
@@ -183,11 +249,11 @@ int enterPassiveMode(FILE** fpArray, char* message)
 
 					if (IPAddressCounter == 4)
 					{
-						port = 256*part;
+						connections[1]->port = 256*part;
 					}
 					else if (IPAddressCounter == 5)
 					{
-						port += part;
+						connections[1]->port += part;
 						break;
 					}
 					else
@@ -202,36 +268,12 @@ int enterPassiveMode(FILE** fpArray, char* message)
 			}
 		}
 
-		printf("IPAddress = %s\n", IPAddress);
-		printf("port = %i\n", port);
+		printf("IPAddress = %s\n", connections[1]->IPAddress);
+		printf("port = %i\n", connections[1]->port);
 
-		sleep(1);
-
-
-			/*server address handling*/
-		bzero((char*)&server_addr,sizeof(server_addr));
-		server_addr.sin_family = AF_INET;
-		server_addr.sin_addr.s_addr = inet_addr(IPAddress);	/*32 bit Internet address network byte ordered*/
-		server_addr.sin_port = htons(port);		/*server TCP port must be network byte ordered */
-	 
-	
-		/*open an TCP socket*/
-		if ((sockfd = socket(AF_INET,SOCK_STREAM,0)) < 0) {
-				perror("socket()");
-				continue;
-			}
-		/*connect to the server*/
-			if(connect(sockfd, 
-					  (struct sockaddr *)&server_addr, 
-				sizeof(server_addr)) < 0){
-				perror("connect()");
-			continue;
-		}
-
-		break;
+		if (attemptConnect(connections[1], message) == 0)
+			break;
 	}
-
-	fpArray[1] = fdopen(sockfd, "r+");
 	
 	return 0;
 }
@@ -314,8 +356,10 @@ void clearScreen()
 }
 
 
-int receiveFile(FILE** fpArray, char* message, char* serverFilename, char* clientFilename)
+int receiveFile(connection** connections, char* message, char* serverFilename, char* clientFilename)
 {
+	enterPassiveMode(connections, message);
+
 	// receiveMessage(fpArray[0], message);
 	// printf("%s\n", message);
 
@@ -352,9 +396,9 @@ int receiveFile(FILE** fpArray, char* message, char* serverFilename, char* clien
 	strcat(message, serverFilename);
 	strcat(message, "\n");
 
-	sendCommand(fpArray[0], message);
+	sendCommand(connections[0], message);
 
-	receiveMessage(fpArray[0], message);
+	receiveMessage(connections[0], message);
 	// printf("%s\n", message);
 
 	long int size = strtol(&message[4], NULL, 10);
@@ -362,20 +406,27 @@ int receiveFile(FILE** fpArray, char* message, char* serverFilename, char* clien
 
 	message[0] = 0;
 
+	strcat(message, "TYPE I\n");
+
+	sendCommand(connections[0], message);
+
+	receiveMessage(connections[0], message);
+	printf("%s\n", message);
+
+	message[0] = 0;
+
 	strcat(message, "RETR ");
 	strcat(message, serverFilename);
 	strcat(message, "\n");
 
-	sendCommand(fpArray[0], message);
+	sendCommand(connections[0], message);
 
-	receiveMessage(fpArray[0], message);
+	receiveMessage(connections[0], message);
 	printf("%s\n", message);
 
-	size_t bufferSize = 8096;
+	size_t bufferSize = 4096;
 	int i, sumBytes = 0, bytes = bufferSize, fd = open(clientFilename, O_WRONLY | O_TRUNC | O_CREAT, 0777);
 	char* buffer = malloc(bufferSize);
-
-	int fd2 = fileno(fpArray[1]);
 
 	struct timeval startTime, finishTime;
 	double sumTime = 0;
@@ -385,14 +436,11 @@ int receiveFile(FILE** fpArray, char* message, char* serverFilename, char* clien
 	if (gettimeofday(&finishTime, NULL) != 0)
 			printf("Error getting time!\n");
 
+	int sumBytesAverage = 0;
+	double sumTimeAverage = 0, repeatTime = 0.5, rate = 0;
 	for (i = 0; sumBytes < size; i++)
 	{
-		bytes = fread(buffer, 1, bufferSize, fpArray[1]);
-		// buffer[bytes-2] = 0;
-
-		// bytes = read(fd2, buffer, bufferSize-2);
-
-		destuff(buffer, &bytes);
+		bytes = fread(buffer, 1, bufferSize, connections[1]->fp);
 
 		if (bytes < 0)
 		{
@@ -413,27 +461,40 @@ int receiveFile(FILE** fpArray, char* message, char* serverFilename, char* clien
 			printf("Error getting time!\n");
 
 		double deltaTime = (double)(finishTime.tv_sec - startTime.tv_sec) + (double)(finishTime.tv_usec - startTime.tv_usec)/1000/1000; // In seconds 
-		
-		clearScreen();
-
-		printTransferRate(bufferSize / deltaTime);
-
-		printPercentage((double)sumBytes / size);
+	
+		printf("deltaTime = %f\n", deltaTime);
 
 		if (gettimeofday(&startTime, NULL) != 0)
 			printf("Error getting time!\n");
 
+		clearScreen();
+
+		if (sumTimeAverage > repeatTime)
+		{
+			rate = (double)sumBytesAverage / sumTimeAverage;
+
+			sumBytesAverage = 0;
+			sumTimeAverage = 0;
+		}
+
+		printPercentage((double)sumBytes / size);
+		printTransferRate(rate);
+
 
 		sumBytes += bytes;
 		sumTime += deltaTime;
-	}
 
-	printf("Read and wrote %i bytes with a average speed of %.1f KB/s\n", sumBytes, size/sumTime/1024);
+		sumBytesAverage += bytes;
+		sumTimeAverage += deltaTime;
+	}
 
 	free(buffer);
 	close(fd);
 
-	printf("File transfered sucessfully!\n");
+	fclose(connections[1]->fp);
+
+	receiveMessage(connections[0], message);
+	printf("%s\n", message);
 
 	return 0;
 }
@@ -441,55 +502,40 @@ int receiveFile(FILE** fpArray, char* message, char* serverFilename, char* clien
 
 int main(int argc, char** argv)
 {
-	
+	char message[4096];
+
 	setHandler();
-	
-	int	sockfd;
-	struct	sockaddr_in server_addr;
-	char	message[4096];
-	int	bytes;
 
 	struct hostent * ent = gethostbyname(SERVER_HOSTNAME);
-	char IPAddress[16];
-		
+	char IPAddress[16];		
 	inet_ntop(AF_INET, ent->h_addr_list[0], IPAddress, INET_ADDRSTRLEN);
-	
-	/*server address handling*/
-	bzero((char*)&server_addr,sizeof(server_addr));
-	server_addr.sin_family = AF_INET;
-	server_addr.sin_addr.s_addr = inet_addr(IPAddress);	/*32 bit Internet address network byte ordered*/
-	server_addr.sin_port = htons(SERVER_PORT);		/*server TCP port must be network byte ordered */
-	 
-	/*open an TCP socket*/
-	if ((sockfd = socket(AF_INET,SOCK_STREAM,0)) < 0) {
-			perror("socket()");
-			exit(0);
-		}
-	/*connect to the server*/
-		if(connect(sockfd, 
-				  (struct sockaddr *)&server_addr, 
-			sizeof(server_addr)) < 0){
-			perror("connect()");
-		exit(0);
-	}
 
-	FILE** fpArray = calloc(5, sizeof(FILE*) * 5);
-	fpArray[0] = fdopen(sockfd, "r+");
+	connection* connections[2];
+	connections[0] = malloc(sizeof(connection*));
+	connections[1] = malloc(sizeof(connection*));
 
+	connections[1]->IPAddress = malloc(16);
 
-	receiveMessage(fpArray[0], message);
+	connections[0]->IPAddress = IPAddress;
+	connections[0]->port = SERVER_PORT;
+
+	attemptConnect(connections[0], message);
+
+	receiveMessage(connections[0], message);
 	printf("%s\n", message);
 	
 	// login(fpArray[0], message, "user anonymous\n", "pass anonymous\n");
-	login(fpArray[0], message, "user dlpuser@dlptest.com\n", "pass e73jzTRTNqCN9PYAAjjn\n");
+	login(connections[0], message, "user dlpuser@dlptest.com\n", "pass e73jzTRTNqCN9PYAAjjn\n");
 
-	enterPassiveMode(fpArray, message);
+	receiveFile(connections, message, "curl.txt", "curl.txt");
+	receiveFile(connections, message, "curl.txt", "curl.txt");
+	receiveFile(connections, message, "curl.txt", "curl.txt");
+	receiveFile(connections, message, "curl.txt", "curl.txt");
 
-	char serverFilename[] = "lab2.pdf", clientFilename[] = "1KB.zip";
+	// receiveFile(connections, message, "sandHeightmap.xcf", "sandHeightmap.xcf");
 
-	receiveFile(fpArray, message, serverFilename, serverFilename);
-
-	closeSockets(fpArray);
+	free(connections[0]);
+	free(connections[1]);
 
 	return 0;
 }
