@@ -9,23 +9,11 @@
 #include <netdb.h>
 #include <string.h>
 #include <fcntl.h>
+#include <ctype.h>
 #include <sys/time.h>
 
-#define SERVER_PORT 21
-
-// #define SERVER_HOSTNAME "speedtest.tele2.net"
-#define SERVER_HOSTNAME "ftp.dlptest.com"
-
-#define MAXCONNECTIONS 10
-
-typedef struct
-{
-	char* IPAddress;
-	int port;
-	FILE* fp;
-}
-connection;
-
+#include "constants.h"
+#include "connection.h"
 
 connection* currentFp = NULL;
 
@@ -64,17 +52,17 @@ void sigalrm_handler(int signal)
 int setHandler()
 {
 	struct sigaction sigalrm_action;
- 	sigalrm_action.sa_handler = sigalrm_handler;
+	sigalrm_action.sa_handler = sigalrm_handler;
 	sigemptyset(&sigalrm_action.sa_mask);
 	sigalrm_action.sa_flags = 0;
 
- 	if (sigaction(SIGALRM, &sigalrm_action, NULL) < 0)
+	if (sigaction(SIGALRM, &sigalrm_action, NULL) < 0)
 	{
 		fprintf(stderr,"Unable to install SIGINT handler\n");
 		return 1;
 	}
 
- 	return 0;
+	return 0;
 }
 
 int attemptConnect(connection* conn, char* message)
@@ -187,12 +175,25 @@ int sendCommand(connection* conn, char* command)
 
 int login(connection* conn, char* message, char* username, char* password)
 {
-	sendCommand(conn, username);
+	char buffer[100+6+1];
+	buffer[0] = 0;
+
+	strcat(buffer, "user ");
+	strcat(buffer, username);
+	strcat(buffer, "\n");
+
+	sendCommand(conn, buffer);
 	
 	receiveMessage(conn, message);
 	printf("%s\n", message);
 
-	sendCommand(conn, password);
+	buffer[0] = 0;
+
+	strcat(buffer, "pass ");
+	strcat(buffer, password);
+	strcat(buffer, "\n");
+
+	sendCommand(conn, buffer);
 
 	receiveMessage(conn, message);
 	printf("%s\n", message);
@@ -399,7 +400,7 @@ int receiveFile(connection** connections, char* message, char* serverFilename, c
 	sendCommand(connections[0], message);
 
 	receiveMessage(connections[0], message);
-	// printf("%s\n", message);
+	printf("%s\n", message);
 
 	long int size = strtol(&message[4], NULL, 10);
 	printf("size = %li\n", size);
@@ -502,42 +503,109 @@ int receiveFile(connection** connections, char* message, char* serverFilename, c
 
 int main(int argc, char** argv)
 {
+	if (argc < 2)
+	{
+		fprintf(stderr, "First argument is missing (server)!.\n");
+		return 1;
+	}
+	char *username = malloc(100), *password = malloc(100), *hostname = malloc(100), *filename = malloc(100);
+	memcpy(username, ANONYMOUS, strlen(ANONYMOUS)+1);
+	memcpy(password, "none", strlen("none")+1);
+	memcpy(hostname, argv[1], strlen(argv[1])+1);
+
+	char* options = "f:p:";
+	int i, opterr = 0, fflag = 0, pflag = 0;
+	char c;
+
+	while ((c = getopt (argc-1, argv+1, options)) != -1)
+	{
+		if (c == 'p')
+		{
+			for (i = 0; optarg[i] != 0; i++)
+			{
+				if (optarg[i] == ':')
+				{
+					memcpy(username, optarg, i);
+					username[i] = 0;
+
+					memcpy(password, optarg+i+1, strlen(optarg)-i);
+
+					pflag = 1;
+					break;
+				}
+			}
+
+			if (i == strlen(optarg)+1)
+			{
+				fprintf(stderr, "Invalid username or password.\n");
+				return 1;
+			}
+		}
+		else if (c == 'f')
+		{
+			memcpy(filename, optarg, strlen(optarg)+1);
+			fflag = 1;
+		}
+		else if (c == '?')
+		{
+			for (i = 0; options[i] != 0; i++)
+			{
+				if (options[i] == ':')
+				{
+					if (optopt == options[i-1])
+				  		fprintf (stderr, "Option -%c requires an argument.\n", optopt);
+					else if (isprint (optopt))
+					  fprintf (stderr, "Unknown option `-%c'.\n", optopt);
+					else
+					  fprintf (stderr,
+							   "Unknown option character `\\x%x'.\n",
+							   optopt);
+				}
+			}
+			
+			return 1;
+		}	
+		else
+			return 1;
+	}
+	
+	if (!(fflag))
+	{
+		fprintf (stderr, "There must be a file specified!\n");
+		return 1;
+	}
+
+	for (i = optind; i < argc-1; i++)
+		printf ("Non-option argument %s\n", argv[i+1]);
+
+
 	char message[4096];
 
 	setHandler();
 
-	struct hostent * ent = gethostbyname(SERVER_HOSTNAME);
+	struct hostent * ent = gethostbyname(hostname);
 	char IPAddress[16];		
 	inet_ntop(AF_INET, ent->h_addr_list[0], IPAddress, INET_ADDRSTRLEN);
 
 	connection* connections[2];
-	connections[0] = malloc(sizeof(connection*));
-	connections[1] = malloc(sizeof(connection*));
+	initializeConnection(&connections[0]);
+	initializeConnection(&connections[1]);
 
-	connections[1]->IPAddress = malloc(16);
-
-	connections[0]->IPAddress = IPAddress;
+	strcpy(connections[0]->IPAddress, IPAddress);
 	connections[0]->port = SERVER_PORT;
+
 
 	attemptConnect(connections[0], message);
 
 	receiveMessage(connections[0], message);
 	printf("%s\n", message);
 	
-	// login(fpArray[0], message, "user anonymous\n", "pass anonymous\n");
-	login(connections[0], message, "user dlpuser@dlptest.com\n", "pass e73jzTRTNqCN9PYAAjjn\n");
+	login(connections[0], message, username, password);
 
-	receiveFile(connections, message, "curl.txt", "curl.txt");
-	receiveFile(connections, message, "curl.txt", "curl.txt");
-	receiveFile(connections, message, "curl.txt", "curl.txt");
-	receiveFile(connections, message, "curl.txt", "curl.txt");
+	receiveFile(connections, message, filename, filename);
 
-	// receiveFile(connections, message, "sandHeightmap.xcf", "sandHeightmap.xcf");
-
-	free(connections[0]);
-	free(connections[1]);
+	freeConnection(&connections[0]);
+	freeConnection(&connections[1]);
 
 	return 0;
 }
-
-

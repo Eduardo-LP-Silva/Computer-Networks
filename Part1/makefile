@@ -1,8 +1,8 @@
 CC		 = gcc
 CFLAGS	 = -g
 LDFLAGS  =
-DEPS	 = main.c makefile
-OBJFILES = main.o
+DEPS	 = main.c connection.c connection.h makefile
+OBJFILES = main.o connection.o
 TARGET	 = main
 
 all: $(TARGET)
