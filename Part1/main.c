@@ -67,7 +67,7 @@ int setHandler()
 
 int attemptConnect(connection* conn, char* message)
 {
-	int	sockfd, i, maxAttempts = 3;
+	int sockfd, i;
 	struct sockaddr_in server_addr;
 	
 	/*server address handling*/
@@ -76,7 +76,7 @@ int attemptConnect(connection* conn, char* message)
 	server_addr.sin_addr.s_addr = inet_addr(conn->IPAddress);	/*32 bit Internet address network byte ordered*/
 	server_addr.sin_port = htons(conn->port);		/*server TCP port must be network byte ordered */
 	
-	for (i = 0; i < maxAttempts; i++)
+	for (i = 0; i < MAXATTEMPTS; i++)
 	{
 		sleep(1);
 
@@ -98,7 +98,7 @@ int attemptConnect(connection* conn, char* message)
 		break;
 	}
 	
-	if (i == maxAttempts)
+	if (i == MAXATTEMPTS)
 	{
 		fprintf(stderr, "Connection timed out!\n");
 		return 1;
@@ -131,7 +131,7 @@ int receiveMessage(connection* conn, char* message)
 			fprintf(stderr, "Error on reading from server!\n");
 			free(bufferSize);
 			free(buffer);
-			return 1;
+			return -1;
 		}
 
 		buffer[bytes] = 0;
@@ -146,7 +146,7 @@ int receiveMessage(connection* conn, char* message)
 			fprintf(stderr, "Error on checking code from server!\n");
 			free(bufferSize);
 			free(buffer);
-			return 2;
+			return -2;
 		}
 
 		if (buffer[3] == ' ')
@@ -158,7 +158,7 @@ int receiveMessage(connection* conn, char* message)
 	free(bufferSize);
 	free(buffer);
 
-	return 0;
+	return (code[0] == '4' || code[0] == '5');
 }
 
 int sendCommand(connection* conn, char* command)
@@ -171,6 +171,8 @@ int sendCommand(connection* conn, char* command)
 		fprintf(stderr, "Error seding command!\n");
 		return 1;
 	}
+
+	return 0;
 }
 
 int login(connection* conn, char* message, char* username, char* password)
@@ -184,7 +186,9 @@ int login(connection* conn, char* message, char* username, char* password)
 
 	sendCommand(conn, buffer);
 	
-	receiveMessage(conn, message);
+	if (receiveMessage(conn, message) != 0)
+		return 1;
+
 	printf("%s\n", message);
 
 	buffer[0] = 0;
@@ -195,7 +199,9 @@ int login(connection* conn, char* message, char* username, char* password)
 
 	sendCommand(conn, buffer);
 
-	receiveMessage(conn, message);
+	if (receiveMessage(conn, message) != 0)
+		return 1;
+
 	printf("%s\n", message);
 
 	return 0;
@@ -206,8 +212,8 @@ int login(connection* conn, char* message, char* username, char* password)
 
 int enterPassiveMode(connection** connections, char* message)
 {
-	int	sockfd, i, j, k, start, IPAddressCounter, messageLength;
-	for (k = 0; k < 10; k++)
+	int sockfd, i, j, k, start, IPAddressCounter, messageLength;
+	for (k = 0; k < MAXCONNECTIONS; k++)
 	{
 		connections[1]->IPAddress[0] = 0;
 		start = -1;
@@ -275,50 +281,13 @@ int enterPassiveMode(connection** connections, char* message)
 		if (attemptConnect(connections[1], message) == 0)
 			break;
 	}
+
+	if (i == MAXCONNECTIONS)
+		return 1;
 	
 	return 0;
 }
 
-void swap(char* a, char*b)
-{
-	char temp = *a;
-	*a = *b;
-	*b = temp;
-}
-
-void shiftLeft(char* buffer, int size, int position, int shift)
-{
-	int i, j;
-
-	for (j = 0; j < shift; j++)
-	{
-
-		for (i = position-1; i < size; i++)
-		{
-			swap(&buffer[i], &buffer[i+1]);
-		}
-
-		size--;
-		position--;
-	}
-}
-
-int destuff(char* buffer, int* size)
-{
-	int i;
-	for (i = 0; i < *size-1; i++) // Destuffs the data package
-	{
-		if (buffer[i] == '\r' && buffer[i+1] == '\n')
-		{
-			shiftLeft(buffer, *size, i+1, 1);
-			(*size) -= 1;
-
-			// buffer[i] = FLAG;
-		}
-	}
-
-	return 0;
-}
 
 void printPercentage(double percentage)
 {
@@ -352,72 +321,93 @@ void clearScreen()
 {
 	printf("\033[2J\033[1;1H");
 	printf("\033[2J\033[1;1H");
-	printf("\033[2J\033[1;1H");
-	printf("\033[2J\033[1;1H");
+}
+
+int splitFilename(char* fullPath, char* path, char* filename)
+{
+	int i, index = -1;
+	for (i = 0; fullPath[i] != 0; i++)
+	{
+		if (fullPath[i] == '/')
+			index = i;
+	}
+
+	if (index != -1)
+	{
+		memcpy(path, fullPath, index+1);
+		path[index+1] = 0;
+
+		strcpy(filename, fullPath+index+1);
+
+		return 0;
+	}
+	else
+	{
+		path[0] = 0;
+
+		strcpy(filename, fullPath);
+
+		return -1;
+	}
 }
 
 
-int receiveFile(connection** connections, char* message, char* serverFilename, char* clientFilename)
+int receiveFile(connection** connections, char* message, char* serverFilename)
 {
-	enterPassiveMode(connections, message);
+	char path[200];
+	char filename[100];
+	splitFilename(serverFilename, path, filename);
 
-	// receiveMessage(fpArray[0], message);
-	// printf("%s\n", message);
+	if (path[0] != 0) // Not empty string
+	{
+		message[0] = 0;
 
-	// message[0] = 0;
+		strcat(message, "CWD ");
+		strcat(message, path);
+		strcat(message, "\n");
 
-	// strcat(message, "LIST\n");
+		sendCommand(connections[0], message);
 
-	// sendCommand(fpArray[0], message);
-	// receiveMessage(fpArray[0], message);
-
-	// if (memcmp(message, "15", 2) != 0)
-	// {
-	// 	fprintf(stderr, "Error reading list of files!\n");
-	// 	return 1;
-	// }
-
-	// receiveMessage(fpArray[1], message);
-	// printf("%s\n", message);
-
-	// receiveMessage(fpArray[0], message);
-	// printf("%s\n", message);
-
-	// if (memcmp(message, "226", 3) != 0)
-	// {
-	// 	fprintf(stderr, "Error reading list of files!\n");
-	// 	return 1;
-	// }
+		receiveMessage(connections[0], message);
+		printf("%s\n", message);
 	
-	// enterPassiveMode(fpArray, message);
+	}
+	
+	if (enterPassiveMode(connections, message) != 0)
+		return 1;
 
+
+	// Gets size of file
 	message[0] = 0;
 
 	strcat(message, "SIZE ");
-	strcat(message, serverFilename);
+	strcat(message, filename);
 	strcat(message, "\n");
 
 	sendCommand(connections[0], message);
-
-	receiveMessage(connections[0], message);
-	printf("%s\n", message);
+	if (receiveMessage(connections[0], message) != 0)
+	{
+		fprintf(stderr, "File doesn't exist!\n");
+		return 1;
+	}
 
 	long int size = strtol(&message[4], NULL, 10);
 	printf("size = %li\n", size);
 
+
+	// Sets transfer type to binary
 	message[0] = 0;
 
 	strcat(message, "TYPE I\n");
 
 	sendCommand(connections[0], message);
-
 	receiveMessage(connections[0], message);
-	printf("%s\n", message);
+
 
 	message[0] = 0;
 
 	strcat(message, "RETR ");
-	strcat(message, serverFilename);
+	strcat(message, filename);
 	strcat(message, "\n");
 
 	sendCommand(connections[0], message);
@@ -426,7 +416,7 @@ int receiveFile(connection** connections, char* message, char* serverFilename, c
 	printf("%s\n", message);
 
 	size_t bufferSize = 4096;
-	int i, sumBytes = 0, bytes = bufferSize, fd = open(clientFilename, O_WRONLY | O_TRUNC | O_CREAT, 0777);
+	int i, sumBytes = 0, bytes = bufferSize, fd = open(filename, O_WRONLY | O_TRUNC | O_CREAT, 0777);
 	char* buffer = malloc(bufferSize);
 
 	struct timeval startTime, finishTime;
@@ -463,7 +453,7 @@ int receiveFile(connection** connections, char* message, char* serverFilename, c
 
 		double deltaTime = (double)(finishTime.tv_sec - startTime.tv_sec) + (double)(finishTime.tv_usec - startTime.tv_usec)/1000/1000; // In seconds 
 	
-		printf("deltaTime = %f\n", deltaTime);
+		// printf("deltaTime = %f\n", deltaTime);
 
 		if (gettimeofday(&startTime, NULL) != 0)
 			printf("Error getting time!\n");
@@ -500,83 +490,144 @@ int receiveFile(connection** connections, char* message, char* serverFilename, c
 	return 0;
 }
 
+void printUsage()
+{
+	printf("Usage: download [OPTIONS] [HOSTNAME] [FILE]\n");
+}
+
+int findFirst(char* str, char target)
+{
+	int i;
+	for (i = 0; str[i] != 0; i++)
+	{
+		if (str[i] == target)
+			return i;
+	}
+
+	return -1;
+}
+
+int findLast(char* str, char target)
+{
+	int i, ret = -1;
+	for (i = 0; str[i] != 0; i++)
+	{
+		if (str[i] == target)
+			ret = i;
+	}
+
+	return ret;
+}
+
+int extractFromLink(char* input, char* username, char* password, char* hostname, char* filename)
+{
+	char ftp[7];
+	memcpy(ftp, input, 6);
+	ftp[6] = 0;
+
+	if (strcmp(ftp, "ftp://") == 0)
+	{
+		input += 6;
+		int index = findLast(input, '@');
+
+		if (index != -1) // Login present
+		{
+			int index2 = findFirst(input, ':');
+
+			if (index2 != -1)
+			{
+				memcpy(username, input, index2+1);
+				username[index2] = 0;
+
+				memcpy(password, input+index2+1, index-index2-1);
+				password[index-index2+1] = 0;
+
+				input += index+1;
+			}
+			else	
+				return 1;
+		}
+		else // No login present
+		{
+			strcpy(username, ANONYMOUS);
+			password[0] = 0;
+		}
+
+		int index2 = findFirst(input, '/');
+
+		if (index2 != -1)
+		{
+			memcpy(hostname, input, index2);
+			hostname[index2+1] = 0;
+
+			strcpy(filename, input+index2+1);
+		}
+		else
+			return 1;
+
+		return 0;
+	}
+
+	return 1;
+}
 
 int main(int argc, char** argv)
 {
-	if (argc < 2)
+	if (argc < 2 || argc > 3)
 	{
-		fprintf(stderr, "First argument is missing (server)!.\n");
+		printUsage();
 		return 1;
 	}
-	char *username = malloc(100), *password = malloc(100), *hostname = malloc(100), *filename = malloc(100);
-	memcpy(username, ANONYMOUS, strlen(ANONYMOUS)+1);
-	memcpy(password, "none", strlen("none")+1);
-	memcpy(hostname, argv[1], strlen(argv[1])+1);
 
-	char* options = "f:p:";
+	char *username = malloc(100), *password = malloc(100), *hostname = malloc(100), *filename = malloc(100);
+
+	if (extractFromLink(argv[1], username, password, hostname, filename) != 0)
+	{
+		printUsage();
+		return 1;
+	}
+
+	char* options = "h";
 	int i, opterr = 0, fflag = 0, pflag = 0;
 	char c;
 
-	while ((c = getopt (argc-1, argv+1, options)) != -1)
+	while ((c = getopt (argc-2, argv, options)) != -1)
 	{
-		if (c == 'p')
+		if (c == 'h')
 		{
-			for (i = 0; optarg[i] != 0; i++)
-			{
-				if (optarg[i] == ':')
-				{
-					memcpy(username, optarg, i);
-					username[i] = 0;
-
-					memcpy(password, optarg+i+1, strlen(optarg)-i);
-
-					pflag = 1;
-					break;
-				}
-			}
-
-			if (i == strlen(optarg)+1)
-			{
-				fprintf(stderr, "Invalid username or password.\n");
-				return 1;
-			}
-		}
-		else if (c == 'f')
-		{
-			memcpy(filename, optarg, strlen(optarg)+1);
-			fflag = 1;
+			printUsage();
+			return 0;
 		}
 		else if (c == '?')
 		{
+			int flag = 1;
 			for (i = 0; options[i] != 0; i++)
 			{
-				if (options[i] == ':')
+				if (options[i] == ':' && optopt == options[i-1])
 				{
-					if (optopt == options[i-1])
-				  		fprintf (stderr, "Option -%c requires an argument.\n", optopt);
-					else if (isprint (optopt))
-					  fprintf (stderr, "Unknown option `-%c'.\n", optopt);
-					else
-					  fprintf (stderr,
-							   "Unknown option character `\\x%x'.\n",
-							   optopt);
+					fprintf (stderr, "Option -%c requires an argument.\n", optopt);
+					flag = 0;
 				}
+				
+			}
+
+			if (flag)
+			{
+				if (isprint (optopt))
+					fprintf (stderr, "Unknown option `-%c'.\n", optopt);
+				else
+					fprintf (stderr, "Unknown option character `\\x%x'.\n", optopt);
 			}
 			
 			return 1;
+
 		}	
 		else
 			return 1;
 	}
 	
-	if (!(fflag))
-	{
-		fprintf (stderr, "There must be a file specified!\n");
-		return 1;
-	}
-
-	for (i = optind; i < argc-1; i++)
-		printf ("Non-option argument %s\n", argv[i+1]);
+	for (i = optind; i < argc-2; i++)
+		printf ("Non-option argument %s\n", argv[i]);
 
 
 	char message[4096];
@@ -595,14 +646,20 @@ int main(int argc, char** argv)
 	connections[0]->port = SERVER_PORT;
 
 
-	attemptConnect(connections[0], message);
+	if (attemptConnect(connections[0], message) != 0)
+		return 1;
 
 	receiveMessage(connections[0], message);
 	printf("%s\n", message);
 	
-	login(connections[0], message, username, password);
+	if (login(connections[0], message, username, password) != 0)
+	{
+		fprintf(stderr, "Failed to login!\n");
+		return 1;
+	}
 
-	receiveFile(connections, message, filename, filename);
+	if (receiveFile(connections, message, filename))
+		return 1;
 
 	freeConnection(&connections[0]);
 	freeConnection(&connections[1]);

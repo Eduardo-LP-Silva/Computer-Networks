@@ -5,9 +5,9 @@
 
 #define SERVER_PORT 21
 
-// #define SERVER_HOSTNAME "speedtest.tele2.net"
-#define SERVER_HOSTNAME "ftp.dlptest.com"
+#define SERVER_HOSTNAME "ftp.fe.up.pt"
 
 #define MAXCONNECTIONS 10
+#define MAXATTEMPTS 3
 
 #endif
