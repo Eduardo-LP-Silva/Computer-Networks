@@ -9,5 +9,7 @@
 
 #define MAXCONNECTIONS 10
 #define MAXATTEMPTS 3
+#define TIMEOUT 3
+
 
 #endif

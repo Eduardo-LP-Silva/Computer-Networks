@@ -5,65 +5,18 @@
 #include <arpa/inet.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <signal.h>
 #include <netdb.h>
 #include <string.h>
 #include <fcntl.h>
 #include <ctype.h>
 #include <sys/time.h>
+#include <sys/stat.h>
 
 #include "constants.h"
 #include "connection.h"
+#include "utilities.h"
 
 connection* currentFp = NULL;
-
-
-int getFreeFilePointer(FILE** fpArray)
-{
-	int i;
-	for (i = 0; i < MAXCONNECTIONS; i++)
-	{
-		if (fpArray[i] == NULL)
-			return i;
-	}
-
-	return -1;
-}
-
-int closeSockets(FILE** fileArray)
-{
-	int i;
-	for (i = 0; fileArray[i] != NULL; ++i)
-	{
-		fclose(fileArray[i]);
-	}
-
-	free(fileArray);
-
-	return 0;
-}
-
-void sigalrm_handler(int signal)
-{
-	printf("Server response timed out!\n");
-
-}
-
-int setHandler()
-{
-	struct sigaction sigalrm_action;
-	sigalrm_action.sa_handler = sigalrm_handler;
-	sigemptyset(&sigalrm_action.sa_mask);
-	sigalrm_action.sa_flags = 0;
-
-	if (sigaction(SIGALRM, &sigalrm_action, NULL) < 0)
-	{
-		fprintf(stderr,"Unable to install SIGINT handler\n");
-		return 1;
-	}
-
-	return 0;
-}
 
 int attemptConnect(connection* conn, char* message)
 {
@@ -121,7 +74,7 @@ int receiveMessage(connection* conn, char* message)
 
 	for (i = 0; flag; i++)
 	{
-		alarm(1);
+		alarm(TIMEOUT);
 		bytes = getline(&buffer, bufferSize, conn->fp);
 		alarm(0); // Cancel alarm
 
@@ -141,16 +94,16 @@ int receiveMessage(connection* conn, char* message)
 			memcpy(code, buffer, 3);
 			code[3] = 0;
 		}
-		else if (memcmp(code, buffer, 3) != 0)
+		
+		if (isNumber(buffer[0]) && isNumber(buffer[1]) && isNumber(buffer[2]))
 		{
-			fprintf(stderr, "Error on checking code from server!\n");
-			free(bufferSize);
-			free(buffer);
-			return -2;
+			if (memcmp(code, buffer, 3) == 0)
+			{
+				if (buffer[3] == ' ')
+					flag = 0;
+			}
+			
 		}
-
-		if (buffer[3] == ' ')
-			flag = 0;
 
 		strcat(message, buffer);
 	}
@@ -163,14 +116,37 @@ int receiveMessage(connection* conn, char* message)
 
 int sendCommand(connection* conn, char* command)
 {
-	int bytes = fwrite(command, 1, strlen(command), conn->fp);
-	// printf("Bytes = %i\n", bytes);
+	int length = strlen(command);
+	char* buffer = malloc(length+2+1);
+	buffer[0] = 0;
+
+	strcpy(buffer, command);
+	strcat(buffer, "\r\n");
+
+	int bytes = fwrite(buffer, 1, length+2, conn->fp);
 	
-	if (bytes != strlen(command))
+	if (bytes != length+2)
 	{
 		fprintf(stderr, "Error seding command!\n");
 		return 1;
 	}
+
+	return 0;
+}
+
+int closeConnection(connection* conn, char* message)
+{
+	message[0] = 0;
+
+	strcpy(message, "QUIT");
+
+	if (sendCommand(conn, message) != 0)
+		return 1;
+
+	if (receiveMessage(conn, message) != 0)
+		return 1;
+
+	printf("%s\n", message);
 
 	return 0;
 }
@@ -182,7 +158,6 @@ int login(connection* conn, char* message, char* username, char* password)
 
 	strcat(buffer, "user ");
 	strcat(buffer, username);
-	strcat(buffer, "\n");
 
 	sendCommand(conn, buffer);
 	
@@ -195,7 +170,6 @@ int login(connection* conn, char* message, char* username, char* password)
 
 	strcat(buffer, "pass ");
 	strcat(buffer, password);
-	strcat(buffer, "\n");
 
 	sendCommand(conn, buffer);
 
@@ -220,7 +194,7 @@ int enterPassiveMode(connection** connections, char* message)
 		IPAddressCounter = 0;
 		connections[1]->port = 0;
 
-		sendCommand(connections[0], "PASV\n");
+		sendCommand(connections[0], "PASV");
 
 		receiveMessage(connections[0], message);
 		messageLength = strlen(message);
@@ -289,69 +263,6 @@ int enterPassiveMode(connection** connections, char* message)
 }
 
 
-void printPercentage(double percentage)
-{
-	if (percentage >= 0 && percentage <= 1)
-	{
-		printf("<");
-
-		int i, length = 15 /* length of the percentage bar */;
-		for (i = 0; i < length; i++)
-		{
-			if ((double)i/length < percentage)
-				printf("|");
-			else
-				printf(" ");
-		}
-
-		printf(">%.1f%%\n", percentage*100);
-	}
-}
-
-void printTransferRate(double rate)
-{
-	if (rate > 0)
-	{
-		printf("Transfer rate : %.1f KB/s\n", rate/1024);
-	}
-}
-
-
-void clearScreen()
-{
-	printf("\033[2J\033[1;1H");
-	printf("\033[2J\033[1;1H");
-}
-
-int splitFilename(char* fullPath, char* path, char* filename)
-{
-	int i, index = -1;
-	for (i = 0; fullPath[i] != 0; i++)
-	{
-		if (fullPath[i] == '/')
-			index = i;
-	}
-
-	if (index != -1)
-	{
-		memcpy(path, fullPath, index+1);
-		path[index+1] = 0;
-
-		strcpy(filename, fullPath+index+1);
-
-		return 0;
-	}
-	else
-	{
-		path[0] = 0;
-
-		strcpy(filename, fullPath);
-
-		return -1;
-	}
-}
-
-
 int receiveFile(connection** connections, char* message, char* serverFilename)
 {
 	char path[200];
@@ -364,7 +275,6 @@ int receiveFile(connection** connections, char* message, char* serverFilename)
 
 		strcat(message, "CWD ");
 		strcat(message, path);
-		strcat(message, "\n");
 
 		sendCommand(connections[0], message);
 
@@ -376,46 +286,47 @@ int receiveFile(connection** connections, char* message, char* serverFilename)
 	if (enterPassiveMode(connections, message) != 0)
 		return 1;
 
+	// Sets transfer type to binary
+	message[0] = 0;
+
+	strcat(message, "TYPE I");
+
+	sendCommand(connections[0], message);
+	if (receiveMessage(connections[0], message) != 0)
+	{
+		printf("%s\n", message);
+		return 1;
+	}
+
 
 	// Gets size of file
 	message[0] = 0;
 
 	strcat(message, "SIZE ");
 	strcat(message, filename);
-	strcat(message, "\n");
 
 	sendCommand(connections[0], message);
 	if (receiveMessage(connections[0], message) != 0)
 	{
-		fprintf(stderr, "File doesn't exist!\n");
+		printf("%s\n", message);
 		return 1;
 	}
 
-	long int size = strtol(&message[4], NULL, 10);
-	printf("size = %li\n", size);
-
-
-	// Sets transfer type to binary
-	message[0] = 0;
-
-	strcat(message, "TYPE I\n");
-
-	sendCommand(connections[0], message);
-	receiveMessage(connections[0], message);
+	long long size = strtoll(&message[4], NULL, 10);
+	printf("size = %lli\n", size);
 
 
 	message[0] = 0;
 
 	strcat(message, "RETR ");
 	strcat(message, filename);
-	strcat(message, "\n");
 
 	sendCommand(connections[0], message);
 
 	receiveMessage(connections[0], message);
 	printf("%s\n", message);
 
-	size_t bufferSize = 4096;
+	size_t bufferSize = 512;
 	int i, sumBytes = 0, bytes = bufferSize, fd = open(filename, O_WRONLY | O_TRUNC | O_CREAT, 0777);
 	char* buffer = malloc(bufferSize);
 
@@ -453,8 +364,6 @@ int receiveFile(connection** connections, char* message, char* serverFilename)
 
 		double deltaTime = (double)(finishTime.tv_sec - startTime.tv_sec) + (double)(finishTime.tv_usec - startTime.tv_usec)/1000/1000; // In seconds 
 	
-		// printf("deltaTime = %f\n", deltaTime);
-
 		if (gettimeofday(&startTime, NULL) != 0)
 			printf("Error getting time!\n");
 
@@ -487,93 +396,134 @@ int receiveFile(connection** connections, char* message, char* serverFilename)
 	receiveMessage(connections[0], message);
 	printf("%s\n", message);
 
+	printf("Downloaded with average %f KB/s\n", (double)sumBytes/sumTime/1024);
+
+
 	return 0;
 }
 
-void printUsage()
-{
-	printf("Usage: download [OPTIONS] [HOSTNAME] [FILE]\n");
-}
 
-int findFirst(char* str, char target)
+
+
+int sendFile(connection** connections, char* message, char* filepath)
 {
-	int i;
-	for (i = 0; str[i] != 0; i++)
+	char path[200];
+	char filename[100];
+	splitFilename(filepath, path, filename);
+	
+	if (enterPassiveMode(connections, message) != 0)
+		return 1;
+
+
+	// Sets transfer type to binary
+	message[0] = 0;
+
+	strcat(message, "TYPE I");
+
+	sendCommand(connections[0], message);
+
+	receiveMessage(connections[0], message);
+	printf("%s\n", message);
+
+	message[0] = 0;
+
+	strcat(message, "STOR ");
+	strcat(message, filename);
+
+	sendCommand(connections[0], message);
+
+	receiveMessage(connections[0], message);
+	printf("%s\n", message);
+
+	size_t bufferSize = 512;
+	int i, sumBytes = 0, bytes = bufferSize, fd = open(filepath, O_RDONLY);
+	char* buffer = malloc(bufferSize);
+
+	struct stat st;
+
+	if (stat(filename, &st) != 0)
 	{
-		if (str[i] == target)
-			return i;
+		printf("Failed to get file size!\n");
+		return 1;
 	}
 
-	return -1;
-}
+	int size = st.st_size;
 
-int findLast(char* str, char target)
-{
-	int i, ret = -1;
-	for (i = 0; str[i] != 0; i++)
+	struct timeval startTime, finishTime;
+	double sumTime = 0;
+
+	if (gettimeofday(&startTime, NULL) != 0)
+			printf("Error getting time!\n");
+	if (gettimeofday(&finishTime, NULL) != 0)
+			printf("Error getting time!\n");
+
+	int sumBytesAverage = 0;
+	double sumTimeAverage = 0, repeatTime = 0.5, rate = 0;
+	for (i = 0; sumBytes < size; i++)
 	{
-		if (str[i] == target)
-			ret = i;
-	}
+		bytes = read(fd, buffer, bytes);
 
-	return ret;
-}
-
-int extractFromLink(char* input, char* username, char* password, char* hostname, char* filename)
-{
-	char ftp[7];
-	memcpy(ftp, input, 6);
-	ftp[6] = 0;
-
-	if (strcmp(ftp, "ftp://") == 0)
-	{
-		input += 6;
-		int index = findLast(input, '@');
-
-		if (index != -1) // Login present
+		if (bytes < 0)
 		{
-			int index2 = findFirst(input, ':');
-
-			if (index2 != -1)
-			{
-				memcpy(username, input, index2+1);
-				username[index2] = 0;
-
-				memcpy(password, input+index2+1, index-index2-1);
-				password[index-index2+1] = 0;
-
-				input += index+1;
-			}
-			else	
-				return 1;
-		}
-		else // No login present
-		{
-			strcpy(username, ANONYMOUS);
-			password[0] = 0;
-		}
-
-		int index2 = findFirst(input, '/');
-
-		if (index2 != -1)
-		{
-			memcpy(hostname, input, index2);
-			hostname[index2+1] = 0;
-
-			strcpy(filename, input+index2+1);
-		}
-		else
+			printf("Error reading from file!\n");
 			return 1;
+		}
 
-		return 0;
+		bytes = fwrite(buffer, 1, bufferSize, connections[1]->fp);
+
+		if (bytes < 0)
+		{
+			printf("Error sending file to server!\n");
+			return 1;
+		}
+
+
+		if (gettimeofday(&finishTime, NULL) != 0)
+			printf("Error getting time!\n");
+
+		double deltaTime = (double)(finishTime.tv_sec - startTime.tv_sec) + (double)(finishTime.tv_usec - startTime.tv_usec)/1000/1000; // In seconds 
+	
+		if (gettimeofday(&startTime, NULL) != 0)
+			printf("Error getting time!\n");
+
+		clearScreen();
+
+		if (sumTimeAverage > repeatTime)
+		{
+			rate = (double)sumBytesAverage / sumTimeAverage;
+
+			sumBytesAverage = 0;
+			sumTimeAverage = 0;
+		}
+
+		printPercentage((double)sumBytes / size);
+		printTransferRate(rate);
+
+
+		sumBytes += bytes;
+		sumTime += deltaTime;
+
+		sumBytesAverage += bytes;
+		sumTimeAverage += deltaTime;
 	}
 
-	return 1;
+	free(buffer);
+	close(fd);
+
+	fclose(connections[1]->fp);
+
+	receiveMessage(connections[0], message);
+	printf("%s\n", message);
+
+	// printf("Uploaded with average %f KB/s\n", (double)sumBytes/sumTime/1024);
+
+	return 0;
 }
+
 
 int main(int argc, char** argv)
 {
-	if (argc < 2 || argc > 3)
+	if (argc < 2 || argc > 4)
 	{
 		printUsage();
 		return 1;
@@ -581,22 +531,26 @@ int main(int argc, char** argv)
 
 	char *username = malloc(100), *password = malloc(100), *hostname = malloc(100), *filename = malloc(100);
 
-	if (extractFromLink(argv[1], username, password, hostname, filename) != 0)
+	if (extractFromArgument(argv[argc-1], username, password, hostname, filename) != 0)
 	{
 		printUsage();
 		return 1;
 	}
 
-	char* options = "h";
-	int i, opterr = 0, fflag = 0, pflag = 0;
+	char* options = "hu";
+	int i, opterr = 0, uflag = 0;
 	char c;
 
-	while ((c = getopt (argc-2, argv, options)) != -1)
+	while ((c = getopt (argc-1, argv, options)) != -1)
 	{
 		if (c == 'h')
 		{
 			printUsage();
 			return 0;
+		}
+		if (c == 'u')
+		{
+			uflag = 1;
 		}
 		else if (c == '?')
 		{
@@ -618,15 +572,12 @@ int main(int argc, char** argv)
 				else
 					fprintf (stderr, "Unknown option character `\\x%x'.\n", optopt);
 			}
-			
-			return 1;
-
 		}	
 		else
 			return 1;
 	}
 	
-	for (i = optind; i < argc-2; i++)
+	for (i = optind; i < argc-1; i++)
 		printf ("Non-option argument %s\n", argv[i]);
 
 
@@ -658,7 +609,18 @@ int main(int argc, char** argv)
 		return 1;
 	}
 
-	if (receiveFile(connections, message, filename))
+	if (uflag)
+	{
+		if (sendFile(connections, message, filename))
+			return 1;
+	}
+	else
+	{
+		if (receiveFile(connections, message, filename))
+			return 1;
+	}
+
+	if (closeConnection(connections[0], message) != 0)
 		return 1;
 
 	freeConnection(&connections[0]);
