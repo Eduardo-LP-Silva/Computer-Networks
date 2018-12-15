@@ -343,7 +343,7 @@ int receiveFile(connection** connections, char* message, char* serverFilename)
 	double sumTimeAverage = 0, repeatTime = 0.5, rate = 0;
 	for (i = 0; sumBytes < size; i++)
 	{
-		usleep(1000 * 1); // Sleeps for 10 millisecond
+		// usleep(100 * 65); // Sleeps for 10 millisecond
 		bytes = fread(buffer, 1, bufferSize, connections[1]->fp);
 
 		if (bytes < 0)
