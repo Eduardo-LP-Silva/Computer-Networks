@@ -164,7 +164,7 @@ int login(connection* conn, char* message, char* username, char* password)
 	if (receiveMessage(conn, message) != 0)
 		return 1;
 
-	printf("%s\n", message);
+	// printf("%s\n", message);
 
 	buffer[0] = 0;
 
@@ -176,7 +176,7 @@ int login(connection* conn, char* message, char* username, char* password)
 	if (receiveMessage(conn, message) != 0)
 		return 1;
 
-	printf("%s\n", message);
+	// printf("%s\n", message);
 
 	return 0;
 }
@@ -198,6 +198,8 @@ int enterPassiveMode(connection** connections, char* message)
 
 		receiveMessage(connections[0], message);
 		messageLength = strlen(message);
+
+		printf("%s\n", message);
 
 		printf("Changing server for passive mode\n");
 
@@ -226,6 +228,8 @@ int enterPassiveMode(connection** connections, char* message)
 				{
 					char portString[4];
 					memcpy(portString, &message[start], i-start);
+					portString[i-start] = 0;
+
 					long int part = strtol(portString, NULL, 10);
 
 					if (IPAddressCounter == 4)
@@ -237,10 +241,7 @@ int enterPassiveMode(connection** connections, char* message)
 						connections[1]->port += part;
 						break;
 					}
-					else
-					{
 
-					}
 				}
 
 				start = i+1;
@@ -342,6 +343,7 @@ int receiveFile(connection** connections, char* message, char* serverFilename)
 	double sumTimeAverage = 0, repeatTime = 0.5, rate = 0;
 	for (i = 0; sumBytes < size; i++)
 	{
+		usleep(1000 * 1); // Sleeps for 10 millisecond
 		bytes = fread(buffer, 1, bufferSize, connections[1]->fp);
 
 		if (bytes < 0)
@@ -367,19 +369,19 @@ int receiveFile(connection** connections, char* message, char* serverFilename)
 		if (gettimeofday(&startTime, NULL) != 0)
 			printf("Error getting time!\n");
 
-		clearScreen();
-
+		
 		if (sumTimeAverage > repeatTime)
 		{
+			clearScreen();
+
 			rate = (double)sumBytesAverage / sumTimeAverage;
 
 			sumBytesAverage = 0;
 			sumTimeAverage = 0;
+
+			printPercentage((double)sumBytes / size);
+			printTransferRate(rate);
 		}
-
-		printPercentage((double)sumBytes / size);
-		printTransferRate(rate);
-
 
 		sumBytes += bytes;
 		sumTime += deltaTime;
@@ -387,6 +389,10 @@ int receiveFile(connection** connections, char* message, char* serverFilename)
 		sumBytesAverage += bytes;
 		sumTimeAverage += deltaTime;
 	}
+
+	clearScreen();
+	printPercentage((double)sumBytes / size);
+	printTransferRate(rate);
 
 	free(buffer);
 	close(fd);
@@ -396,7 +402,7 @@ int receiveFile(connection** connections, char* message, char* serverFilename)
 	receiveMessage(connections[0], message);
 	printf("%s\n", message);
 
-	printf("Downloaded with average %f KB/s\n", (double)sumBytes/sumTime/1024);
+	printf("Downloaded with average %.1f KB/s\n", (double)sumBytes/sumTime/1024);
 
 
 	return 0;
@@ -486,19 +492,18 @@ int sendFile(connection** connections, char* message, char* filepath)
 		if (gettimeofday(&startTime, NULL) != 0)
 			printf("Error getting time!\n");
 
-		clearScreen();
-
 		if (sumTimeAverage > repeatTime)
 		{
+			clearScreen();
+
 			rate = (double)sumBytesAverage / sumTimeAverage;
 
 			sumBytesAverage = 0;
 			sumTimeAverage = 0;
+
+			printPercentage((double)sumBytes / size);
+			printTransferRate(rate);
 		}
-
-		printPercentage((double)sumBytes / size);
-		printTransferRate(rate);
-
 
 		sumBytes += bytes;
 		sumTime += deltaTime;
@@ -506,6 +511,10 @@ int sendFile(connection** connections, char* message, char* filepath)
 		sumBytesAverage += bytes;
 		sumTimeAverage += deltaTime;
 	}
+
+	clearScreen();
+	printPercentage((double)sumBytes / size);
+	printTransferRate(rate);
 
 	free(buffer);
 	close(fd);
@@ -515,7 +524,7 @@ int sendFile(connection** connections, char* message, char* filepath)
 	receiveMessage(connections[0], message);
 	printf("%s\n", message);
 
-	// printf("Uploaded with average %f KB/s\n", (double)sumBytes/sumTime/1024);
+	printf("Uploaded with average %.1f KB/s\n", (double)sumBytes/sumTime/1024);
 
 	return 0;
 }
