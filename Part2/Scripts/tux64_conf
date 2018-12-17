@@ -1,0 +1,17 @@
+#!/bin/bash
+
+echo -n "Restarting network service"
+service networking restart
+
+echo "Setting up IP's"
+ifconfig eth0 up 172.16.60.254/24
+ifconfig eth1 up 172.16.61.253/24
+
+echo "Setting up default route (Cisco Router)"
+route add default gw 172.16.61.254
+
+echo 1 > /proc/sys/net/ipv4/ip_forward
+echo 0 > /proc/sys/net/ipv4/icmp_echo_ignore_broadcasts
+
+echo "Setting up DNS"
+printf "search netlab.fe.up.pt\nnameserver 172.16.1.1\nnameserver 172.16.2.1\n" > /etc/resolv.conf 

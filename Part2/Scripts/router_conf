@@ -1,0 +1,28 @@
+#!/bin/bash
+
+route_cmd() {
+  echo $1 > /dev/ttyS0
+}
+
+route_cmd "conf t" 
+route_cmd "interface gigabitethernet 0/0"
+route_cmd "ip address 172.16.61.254 255.255.255.0" 
+route_cmd "no shutdown" 
+route_cmd "ip nat inside" 
+route_cmd "exit"
+
+route_cmd "interface gigabitethernet 0/1" 
+route_cmd "ip address 172.16.1.69 255.255.255.0" 
+route_cmd "no shutdown" 
+route_cmd "ip nat outside" 
+route_cmd "exit" 
+
+route_cmd "ip nat pool ovrld 172.16.1.69 172.16.1.69 prefix 24" 
+route_cmd "ip nat inside source list 1 pool ovrld overload" 
+
+route_cmd "access-list 1 permit 172.16.60.0 0.0.0.7" 
+route_cmd "access-list 1 permit 172.16.61.0 0.0.0.7"
+
+route_cmd "ip route 0.0.0.0 0.0.0.0 172.16.1.254" 
+route_cmd "ip route 172.16.60.0 255.255.255.0 172.16.61.253" 
+route_cmd "end"

@@ -1,0 +1,48 @@
+#!/bin/bash
+
+route_cmd() {
+  echo $1 > /dev/ttyS0
+}
+
+route_cmd "configure terminal"
+route_cmd "vlan 60"
+route_cmd "end"
+
+route_cmd "configure terminal"
+route_cmd "interface fastethernet 0/1"
+route_cmd "switchport mode access"
+route_cmd "switchport access vlan 60"
+route_cmd "end"
+
+route_cmd "configure terminal"
+route_cmd "interface fastethernet 0/2"
+route_cmd "switchport mode access"
+route_cmd "switchport access vlan 60"
+route_cmd "end"
+
+route_cmd "configure terminal"
+route_cmd "vlan 61"
+route_cmd "end"
+
+route_cmd "configure terminal"
+route_cmd "interface fastethernet 0/3"
+route_cmd "switchport mode access"
+route_cmd "switchport access vlan 61"
+route_cmd "end"
+
+route_cmd "configure terminal"
+route_cmd "interface fastethernet 0/4"
+route_cmd "switchport mode access"
+route_cmd "switchport access vlan 61"
+route_cmd "end"
+
+route_cmd "configure terminal"
+route_cmd "interface fastethernet 0/5"
+route_cmd "switchport mode access"
+route_cmd "switchport access vlan 61"
+route_cmd "end"
+
+
+
+
+
