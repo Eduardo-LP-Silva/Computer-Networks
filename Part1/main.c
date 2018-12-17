@@ -199,8 +199,6 @@ int enterPassiveMode(connection** connections, char* message)
 		receiveMessage(connections[0], message);
 		messageLength = strlen(message);
 
-		printf("%s\n", message);
-
 		printf("Changing server for passive mode\n");
 
 		for (i = 0; i < messageLength; ++i)
@@ -250,8 +248,8 @@ int enterPassiveMode(connection** connections, char* message)
 			}
 		}
 
-		printf("IPAddress = %s\n", connections[1]->IPAddress);
-		printf("port = %i\n", connections[1]->port);
+		// printf("IPAddress = %s\n", connections[1]->IPAddress);
+		// printf("port = %i\n", connections[1]->port);
 
 		if (attemptConnect(connections[1], message) == 0)
 			break;
@@ -314,7 +312,7 @@ int receiveFile(connection** connections, char* message, char* serverFilename)
 	}
 
 	long long size = strtoll(&message[4], NULL, 10);
-	printf("size = %lli\n", size);
+	// printf("size = %lli\n", size);
 
 
 	message[0] = 0;
@@ -325,7 +323,7 @@ int receiveFile(connection** connections, char* message, char* serverFilename)
 	sendCommand(connections[0], message);
 
 	receiveMessage(connections[0], message);
-	printf("%s\n", message);
+	// printf("%s\n", message);
 
 	size_t bufferSize = 512;
 	int i, sumBytes = 0, bytes = bufferSize, fd = open(filename, O_WRONLY | O_TRUNC | O_CREAT, 0777);
@@ -402,7 +400,7 @@ int receiveFile(connection** connections, char* message, char* serverFilename)
 	receiveMessage(connections[0], message);
 	printf("%s\n", message);
 
-	printf("Downloaded with average %.1f KB/s\n", (double)sumBytes/sumTime/1024);
+	printf("File downloaded with average %.1f KB/s\n", (double)sumBytes/sumTime/1024);
 
 
 	return 0;
@@ -524,7 +522,7 @@ int sendFile(connection** connections, char* message, char* filepath)
 	receiveMessage(connections[0], message);
 	printf("%s\n", message);
 
-	printf("Uploaded with average %.1f KB/s\n", (double)sumBytes/sumTime/1024);
+	printf("File uploaded with average %.1f KB/s\n", (double)sumBytes/sumTime/1024);
 
 	return 0;
 }
@@ -532,7 +530,7 @@ int sendFile(connection** connections, char* message, char* filepath)
 
 int main(int argc, char** argv)
 {
-	if (argc < 2 || argc > 4)
+	if (argc < 2 || argc > 3)
 	{
 		printUsage();
 		return 1;
@@ -617,6 +615,8 @@ int main(int argc, char** argv)
 		fprintf(stderr, "Failed to login!\n");
 		return 1;
 	}
+	
+	printf("Login sucessful!\n");
 
 	if (uflag)
 	{
